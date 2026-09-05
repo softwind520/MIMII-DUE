@@ -12,8 +12,8 @@ import re
 # additional
 import numpy as np
 import librosa
-import librosa.core
-import librosa.feature
+# import librosa.core
+# import librosa.feature
 import yaml
 
 ########################################################################
@@ -147,12 +147,16 @@ def file_to_vectors(file_name,
         return np.empty((0, dims))
 
     # generate feature vectors by concatenating multiframes
-    vectors = np.zeros((n_vectors, dims))
+    # vectors = np.zeros((n_vectors, dims))
+    vectors = np.zeros(
+        (n_vectors, dims),
+        dtype=np.float32,
+    )
     for t in range(n_frames):
         vectors[:, n_mels * t : n_mels * (t + 1)] = log_mel_spectrogram[:, t : t + n_vectors].T
 
-    return vectors
-
+    # return vectors
+    return vectors.astype(np.float32, copy=False)
 
 ########################################################################
 

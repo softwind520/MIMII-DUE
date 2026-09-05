@@ -14,10 +14,11 @@ import numpy as np
 import scipy.stats
 # from import
 from tqdm import tqdm
-try:
-    from sklearn.externals import joblib
-except:
-    import joblib
+import joblib
+# try:
+#     from sklearn.externals import joblib
+# except:
+#     import joblib
 # original lib
 import common as com
 import keras_model
@@ -113,8 +114,13 @@ def file_list_to_data(file_list,
                                                 hop_length=hop_length,
                                                 power=power)
         vectors = vectors[: : n_hop_frames, :]
+        vectors = vectors.astype(np.float32, copy=False)
         if idx == 0:
-            data = np.zeros((len(file_list) * vectors.shape[0], dims), float)
+            # data = np.zeros((len(file_list) * vectors.shape[0], dims), float)
+            data = np.zeros(
+                (len(file_list) * vectors.shape[0], dims),
+                dtype=np.float32,
+            )
         data[vectors.shape[0] * idx : vectors.shape[0] * (idx + 1), :] = vectors
 
     return data
@@ -150,8 +156,13 @@ if __name__ == "__main__":
 
         # set path
         machine_type = os.path.split(target_dir)[1]
-        model_file_path = "{model}/model_{machine_type}.hdf5".format(model=param["model_directory"],
-                                                                     machine_type=machine_type)
+        # model_file_path = "{model}/model_{machine_type}.hdf5".format(model=param["model_directory"],
+        #                                                              machine_type=machine_type)
+
+        model_file_path = "{model}/model_{machine_type}.keras".format(
+            model=param["model_directory"],
+            machine_type=machine_type,
+        )
 
         if os.path.exists(model_file_path):
             com.logger.info("model exists")
@@ -201,12 +212,34 @@ if __name__ == "__main__":
                             verbose=param["fit"]["verbose"])
 
         # calculate y_pred for fitting anomaly score distribution
+        # y_pred = []
+        # start_idx = 0
+        # for file_idx in range(len(files)):
+        #         y_pred.append(np.mean(np.square(data[start_idx : start_idx + n_vectors_ea_file, :]
+        #                               - model.predict(data[start_idx : start_idx + n_vectors_ea_file, :]))))
+        #         start_idx += n_vectors_ea_file
+
         y_pred = []
         start_idx = 0
+
         for file_idx in range(len(files)):
-                y_pred.append(np.mean(np.square(data[start_idx : start_idx + n_vectors_ea_file, :] 
-                                      - model.predict(data[start_idx : start_idx + n_vectors_ea_file, :]))))
-                start_idx += n_vectors_ea_file
+            file_data = data[
+                        start_idx: start_idx + n_vectors_ea_file,
+                        :
+                        ]
+
+            reconstructed = model.predict(
+                file_data,
+                batch_size=param["fit"]["batch_size"],
+                verbose=0,
+            )
+
+            score = float(
+                np.mean(np.square(file_data - reconstructed))
+            )
+            y_pred.append(score)
+
+            start_idx += n_vectors_ea_file
 
         # fit anomaly score distribution
         shape_hat, loc_hat, scale_hat = scipy.stats.gamma.fit(y_pred)

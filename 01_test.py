@@ -16,10 +16,11 @@ import scipy.stats
 # from import
 from tqdm import tqdm
 from sklearn import metrics
-try:
-    from sklearn.externals import joblib
-except:
-    import joblib
+import joblib
+# try:
+#     from sklearn.externals import joblib
+# except:
+#     import joblib
 # original lib
 import common as com
 import keras_model
@@ -77,8 +78,14 @@ if __name__ == "__main__":
 
         print("============== MODEL LOAD ==============")
         # load model file
-        model_file = "{model}/model_{machine_type}.hdf5".format(model=param["model_directory"],
-                                                                machine_type=machine_type)
+        # model_file = "{model}/model_{machine_type}.hdf5".format(model=param["model_directory"],
+        #                                                         machine_type=machine_type)
+
+        model_file = "{model}/model_{machine_type}.keras".format(
+            model=param["model_directory"],
+            machine_type=machine_type,
+        )
+
         if not os.path.exists(model_file):
             com.logger.error("{} model not found ".format(machine_type))
             sys.exit(-1)
@@ -140,7 +147,19 @@ if __name__ == "__main__":
                     except:
                         com.logger.error("File broken!!: {}".format(file_path))
 
-                    y_pred[file_idx] = np.mean(np.square(data - model.predict(data)))
+                    # y_pred[file_idx] = np.mean(np.square(data - model.predict(data)))
+
+                    data = data.astype(np.float32, copy=False)
+
+                    reconstructed = model.predict(
+                        data,
+                        batch_size=param["fit"]["batch_size"],
+                        verbose=0,
+                    )
+
+                    y_pred[file_idx] = float(
+                        np.mean(np.square(data - reconstructed))
+                    )
                     
                     # store anomaly scores
                     anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])

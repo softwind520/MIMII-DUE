@@ -2,10 +2,12 @@
 # import python-library
 ########################################################################
 # from import
-import keras.models
-from keras import backend as K
-from keras.layers import Input, Dense, BatchNormalization, Activation
-from keras.models import Model
+import keras
+from keras import layers
+# import keras.models
+# from keras import backend as K
+# from keras.layers import Input, Dense, BatchNormalization, Activation
+# from keras.models import Model
 
 
 ########################################################################
@@ -18,58 +20,66 @@ def get_model(input_dim, lr):
     (128*128*128*128*8*128*128*128*128)
     """
 
-    x = Input(shape=(input_dim,))
+    x = keras.Input(shape=(input_dim,))
 
-    h = Dense(128)(x)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(x)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(8)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
-    
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(8)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(128)(h)
-    h = BatchNormalization()(h)
-    h = Activation('relu')(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    h = Dense(input_dim)(h)
+    h = layers.Dense(128)(h)
+    h = layers.BatchNormalization()(h)
+    h = layers.Activation("relu")(h)
 
-    model = Model(inputs=x, outputs=h)
+    h = layers.Dense(input_dim)(h)
 
-    model.compile(optimizer=keras.optimizers.Adam(lr=lr), 
-                  loss='mean_squared_error')
+    model = keras.Model(inputs=x, outputs=h)
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=lr),
+        loss="mean_squared_error",
+    )
 
     return model
 
 #########################################################################
 
 def load_model(file_path):
-    return keras.models.load_model(file_path, compile=False)
+    return keras.saving.load_model(file_path, compile=False)
 
 def clear_session():
-    K.clear_session()
+    keras.backend.clear_session()
+#
+# def load_model(file_path):
+#     return keras.models.load_model(file_path, compile=False)
+#
+# def clear_session():
+#     K.clear_session()
     
