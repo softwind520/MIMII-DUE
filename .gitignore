@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+checkpoints/
+outputs/
+feature_cache/
+*.pt
+*.pth
+.idea/

@@ -1,0 +1,74 @@
+project:
+  name: dbcd_diffusion
+  seed: 42
+  device: auto
+  checkpoint_directory: ./checkpoints
+  output_directory: ./outputs
+
+data:
+  root: ../dev_data
+  feature_cache: ./feature_cache
+  cache_dtype: float16
+  memory_cache_files: 8
+  sampling_rate: 16000
+  machine_types: [fan, gearbox, pump, slider, valve]
+  domains: [source, target]
+  n_fft: 1024
+  win_length: 400
+  hop_length: 160
+  n_mels: 128
+  power: 2.0
+  patch_frames: 128
+  train_patch_hop: 128
+  test_patch_hop: 5
+  normalization: log_db_minmax
+  top_db: 80.0
+  cover_tail: false
+
+model:
+  in_channels: 1
+  base_channels: 64
+  channel_multipliers: [1, 2, 4, 8]
+  residual_blocks: 2
+  attention_resolutions: [32]
+  attention_heads: 4
+  dropout: 0.0
+  condition_dimension: 128
+
+conditioning:
+  use_section: true
+  use_domain: true
+  domain_balance: true
+  condition_dropout: 0.1
+
+diffusion:
+  training_steps: 1000
+  beta_schedule: sigmoid
+  beta_start: 0.0001
+  beta_end: 0.02
+  prediction_type: epsilon
+  inference_start_step: 280
+  ddim_stride: 4
+  clip_denoised: true
+
+training:
+  learning_rate: 0.0001
+  weight_decay: 0.0
+  batch_size: 8
+  gradient_accumulation_steps: 3
+  epochs: 100
+  num_workers: 4
+  ema_decay: 0.995
+  gradient_clip_norm: 1.0
+  mixed_precision: true
+  log_interval: 50
+  checkpoint_every_epochs: 10
+
+scoring:
+  residual: absolute
+  topk_ratio: 0.1
+  positive_only: false
+  patch_aggregation: mean
+
+evaluation:
+  max_fpr: 0.1
