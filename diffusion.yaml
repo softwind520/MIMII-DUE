@@ -48,7 +48,7 @@ diffusion:
   beta_end: 0.02
   prediction_type: epsilon
   inference_start_step: 280
-  ddim_stride: 4
+  ddim_stride: 20
   clip_denoised: true
 
 training:
@@ -62,7 +62,6 @@ training:
   gradient_clip_norm: 1.0
   mixed_precision: true
   log_interval: 50
-  checkpoint_every_epochs: 10
 
 scoring:
   residual: absolute
@@ -72,3 +71,8 @@ scoring:
 
 evaluation:
   max_fpr: 0.1
+  batch_size: 32
+  num_workers: 1
+  mixed_precision: true
+  reconstruction_samples: 1
+  log_interval_batches: 50

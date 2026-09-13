@@ -28,7 +28,7 @@ diffusion/
   records.py         shared audio and patch metadata
   dataset.py         dataset indexing, FBank extraction, and patching
   conditioning.py    section/domain IDs and condition dropout
-  unet.py            conditional 2D denoising U-Net
+  unet.py            timestep-conditioned 2D denoising U-Net
   diffusion.py       DDPM training and DDIM reconstruction
   scoring.py         residual and audio-level anomaly scores
   metrics.py         DCASE-compatible AUC and pAUC
@@ -44,7 +44,7 @@ tests/               fast structural and unit tests
 1. Project scaffold and configuration - complete.
 2. File-level dataset indexing and 128 x 128 FBank patches - complete.
 3. Unconditional DDPM training baseline - complete.
-4. Partial DDIM reconstruction, anomaly scoring, and CSV evaluation.
+4. Partial DDIM reconstruction, anomaly scoring, and CSV evaluation - complete.
 5. Domain-balanced section/domain conditioning.
 
 The original dense-AE source files and its generated ``model/``/``result/``
@@ -106,7 +106,9 @@ python 00_train.py
 
 Training uses batch size 8 with three-step gradient accumulation (effective
 batch size 24), mixed precision on CUDA, domain-balanced sampling, EMA, and
-float16 feature caching. Resume the latest epoch-level checkpoint with:
+float16 feature caching. Each machine keeps only ``last.pt`` for resuming and
+the smaller ``ema.pt`` for evaluation; periodic full-state snapshots are not
+created. Resume the latest epoch-level checkpoint with:
 
 ```bash
 python 00_train.py --machine-type fan --resume
@@ -114,3 +116,40 @@ python 00_train.py --machine-type fan --resume
 
 For a short diagnostic run, set an optimizer-step limit such as
 ``--max-steps 10``.
+
+## Evaluate with partial DDIM reconstruction
+
+First run the end-to-end smoke evaluation. It selects one normal and one
+anomalous file from every fan section/domain, uses non-overlapping patches,
+and performs five DDIM steps:
+
+```bash
+python 01_test.py --smoke-test --machine-type fan
+```
+
+The smoke metrics contain only one file per class and therefore verify the
+pipeline only; they are not meaningful experiment results. A useful server
+benchmark before the full run is:
+
+```bash
+python 01_test.py --machine-type fan --max-files-per-group 5
+```
+
+Run the complete fan development-set evaluation with:
+
+```bash
+python 01_test.py --machine-type fan
+```
+
+The default evaluation keeps the dense five-frame test stride and uses 15
+deterministic DDIM denoising steps from timestep 280 (``ddim_stride=20``).
+Runtime/quality ablations can be launched without editing YAML, for example:
+
+```bash
+python 01_test.py --machine-type fan --ddim-stride 10
+python 01_test.py --machine-type fan --test-patch-hop 32 --batch-size 64
+```
+
+Outputs are written under ``outputs/``: six anomaly-score CSV files per
+machine, a grouped ``metrics.csv``, and ``summary.json`` containing arithmetic
+and harmonic means of AUC and pAUC.

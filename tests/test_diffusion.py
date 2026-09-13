@@ -54,6 +54,22 @@ class DiffusionTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         self.assertIsNotNone(model.output_projection.weight.grad)
 
+    def test_ddim_reconstruction_is_finite_and_deterministic(self) -> None:
+        config = tiny_config()
+        diffusion = GaussianDiffusion(config)
+        model = UNetDenoiser(config).eval()
+        clean = torch.rand(2, 1, 32, 32).mul(2.0).sub(1.0)
+        noise = torch.randn_like(clean)
+        first = diffusion.ddim_reconstruct(
+            model, clean, start_step=10, stride=3, noise=noise
+        )
+        second = diffusion.ddim_reconstruct(
+            model, clean, start_step=10, stride=3, noise=noise
+        )
+        self.assertEqual(first.shape, clean.shape)
+        self.assertTrue(torch.isfinite(first).all())
+        self.assertTrue(torch.equal(first, second))
+
 
 if __name__ == "__main__":
     unittest.main()

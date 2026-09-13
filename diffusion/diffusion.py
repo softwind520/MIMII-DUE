@@ -43,6 +43,7 @@ class GaussianDiffusion(nn.Module):
 
     def __init__(self, config: dict):
         super().__init__()
+        self.config = config
         diffusion_config = config["diffusion"]
         self.training_steps = int(diffusion_config["training_steps"])
         self.prediction_type = diffusion_config.get("prediction_type", "epsilon")
@@ -99,7 +100,62 @@ class GaussianDiffusion(nn.Module):
         predicted_noise = model(noisy, timesteps)
         return F.mse_loss(predicted_noise, target_noise)
 
-    def ddim_reconstruct(self, *args, **kwargs):
-        """Partial-noise DDIM reconstruction is introduced in stage 4."""
-        del args, kwargs
-        raise NotImplementedError("DDIM reconstruction is implemented in stage 4.")
+    @torch.no_grad()
+    def ddim_reconstruct(
+        self,
+        model: nn.Module,
+        clean: torch.Tensor,
+        start_step: int | None = None,
+        stride: int | None = None,
+        noise: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Partially noise ``clean`` and reconstruct it with deterministic DDIM."""
+        diffusion_config = self.config["diffusion"]
+        start = int(
+            diffusion_config.get("inference_start_step", 280)
+            if start_step is None
+            else start_step
+        )
+        step_stride = int(
+            diffusion_config.get("ddim_stride", 4) if stride is None else stride
+        )
+        if not 0 <= start < self.training_steps:
+            raise ValueError(
+                f"inference_start_step must be in [0, {self.training_steps - 1}], got {start}"
+            )
+        if step_stride < 1:
+            raise ValueError("DDIM stride must be positive")
+
+        if noise is None:
+            noise = torch.randn_like(clean)
+        start_timesteps = torch.full(
+            (clean.shape[0],), start, device=clean.device, dtype=torch.long
+        )
+        sample, _ = self.q_sample(clean, start_timesteps, noise)
+        timesteps = list(range(start, -1, -step_stride))
+        if timesteps[-1] != 0:
+            timesteps.append(0)
+
+        clip_denoised = bool(diffusion_config.get("clip_denoised", True))
+        for index, current_step in enumerate(timesteps):
+            current = torch.full(
+                (clean.shape[0],), current_step, device=clean.device, dtype=torch.long
+            )
+            predicted_noise = model(sample, current)
+            alpha = self.cumulative_alphas[current_step].to(dtype=sample.dtype)
+            predicted_clean = (
+                sample - (1.0 - alpha).sqrt() * predicted_noise
+            ) / alpha.sqrt()
+            if clip_denoised:
+                predicted_clean = predicted_clean.clamp(-1.0, 1.0)
+
+            previous_step = timesteps[index + 1] if index + 1 < len(timesteps) else -1
+            if previous_step < 0:
+                sample = predicted_clean
+            else:
+                previous_alpha = self.cumulative_alphas[previous_step].to(dtype=sample.dtype)
+                sample = (
+                    previous_alpha.sqrt() * predicted_clean
+                    + (1.0 - previous_alpha).sqrt() * predicted_noise
+                )
+        return sample
