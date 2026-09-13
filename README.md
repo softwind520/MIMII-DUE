@@ -51,12 +51,30 @@ The original dense-AE source files and its generated ``model/``/``result/``
 artifacts have been removed, as this directory now belongs to the diffusion
 experiment.
 
+## Reproducible environment
+
+The non-PyTorch runtime dependencies are pinned exactly in
+``requirements.txt``. PyTorch is intentionally excluded so installing this
+project never replaces the server's existing CUDA-specific build. The
+selected NumPy 2.0.2 also satisfies ``opencv-python-headless==4.13.0.92`` when
+OpenCV is already installed in a shared server environment.
+
+```bash
+python -m pip install --upgrade --no-cache-dir -r requirements.txt
+python -m pip check
+python -c "import torch, numpy, scipy, sklearn, yaml; print(torch.__version__, numpy.__version__, torch.cuda.is_available())"
+```
+
+The project does not depend on OpenCV, TensorFlow, ONNX, or protobuf, so those
+packages are intentionally not managed by this requirements file.
+
 ## Validate the data pipeline
 
 Run a quick local or server-side check without training a model:
 
 ```bash
 python -m pip install -r requirements.txt
+python -m pip check
 python -m unittest discover -s tests -v
 python 00_train.py --check-data --machine-type fan --max-files 6
 ```
