@@ -153,3 +153,72 @@ python 01_test.py --machine-type fan --test-patch-hop 32 --batch-size 64
 Outputs are written under ``outputs/``: six anomaly-score CSV files per
 machine, a grouped ``metrics.csv``, and ``summary.json`` containing arithmetic
 and harmonic means of AUC and pAUC.
+
+## Diagnose fan scoring without retraining
+
+The fan sweep reuses the trained EMA checkpoint. For every DDIM start step it
+reconstructs each patch once, then evaluates absolute and ReLU anomaly filters,
+multiple pixel TopK ratios, and several patch-to-audio aggregations in memory.
+Start with a pipeline check:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --fan-sweep --smoke-test
+```
+
+Then run the full default sweep:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --fan-sweep --machine-type fan
+```
+
+The default start steps are ``100 200 280 400``. Step 600 is intentionally
+left for a second pass because it substantially increases DDIM runtime. Custom
+values can be supplied without changing the YAML:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --fan-sweep \
+  --sweep-start-steps 100 200 280 400 600 \
+  --sweep-topk-ratios 0.01 0.03 0.05 0.1 0.2 1.0 \
+  --sweep-aggregations mean max topk_mean \
+  --patch-topk-ratio 0.1
+```
+
+Results are stored in ``outputs/fan_sweep/``. The summary table is sorted by
+the harmonic mean over all six AUCs and six pAUCs, while the group table keeps
+every section/domain result. ``fan_sweep_best.json`` contains the highest
+development-set setting. Since labelled development-test data selects that
+setting, freeze it before evaluating other machines or final evaluation data.
+
+## Evaluate fan with residual-distribution GMMs
+
+This stage keeps the trained fan U-Net fixed. It reconstructs normal training
+audio and test audio from timestep 400, pools each residual map over time into
+a 128-dimensional frequency vector, and averages patch vectors into one vector
+per audio file. Two-component GMM negative log likelihood is then evaluated for
+signed, absolute, and ReLU residuals using global or section-specific models and
+full or diagonal covariance matrices.
+
+Run a small end-to-end check first:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --fan-gmm --smoke-test
+```
+
+Run the complete fan experiment with:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --fan-gmm --machine-type fan
+```
+
+The default patch hop is 32 for both normal fitting data and test data. This
+keeps the two residual distributions comparable while avoiding the large amount
+of redundant computation caused by a five-frame hop. It can be overridden with
+``--gmm-patch-hop``. Outputs are written to ``outputs/fan_gmm/``:
+
+- ``fan_gmm_summary.csv`` ranks all GMM configurations;
+- ``fan_gmm_groups.csv`` contains every section/domain metric;
+- ``fan_gmm_audio_scores.csv`` preserves file-level scores for later analysis;
+- ``fan_residual_features.npz`` preserves file-level residual vectors so new
+  statistical scorers can be tested without repeating DDIM reconstruction;
+- ``fan_gmm_best.json`` and ``fan_gmm_run.json`` record the best result and the
+  full run configuration.
