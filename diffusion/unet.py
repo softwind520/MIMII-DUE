@@ -8,6 +8,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .conditioning import MetadataConditioner
+
 
 def _group_count(channels: int, maximum: int = 32) -> int:
     """Return the largest useful GroupNorm divisor up to ``maximum``."""
@@ -140,11 +142,7 @@ class UNetStage(nn.Module):
 
 
 class UNetDenoiser(nn.Module):
-    """Predict noise for a spectrogram patch at a diffusion timestep.
-
-    Stage 3 is deliberately unconditional: ``section_id`` and ``domain_id``
-    are accepted for a stable future interface but are not used until stage 5.
-    """
+    """Predict noise from a timestep and optional section/domain metadata."""
 
     def __init__(self, config: dict):
         super().__init__()
@@ -174,6 +172,13 @@ class UNetDenoiser(nn.Module):
             nn.Linear(embedding_dim, embedding_dim * 4),
             nn.SiLU(),
             nn.Linear(embedding_dim * 4, embedding_dim),
+        )
+        conditioning_config = config["conditioning"]
+        uses_metadata = bool(conditioning_config.get("use_section", False)) or bool(
+            conditioning_config.get("use_domain", False)
+        )
+        self.metadata_conditioner = (
+            MetadataConditioner(config, embedding_dim) if uses_metadata else None
         )
         self.input_projection = nn.Conv2d(in_channels, channels[0], kernel_size=3, padding=1)
 
@@ -240,7 +245,6 @@ class UNetDenoiser(nn.Module):
         section_id: torch.Tensor | None = None,
         domain_id: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        del section_id, domain_id
         if noisy_patch.ndim != 4:
             raise ValueError(f"Expected BCHW input, received shape {tuple(noisy_patch.shape)}")
         if timestep.ndim == 0:
@@ -249,6 +253,13 @@ class UNetDenoiser(nn.Module):
             raise ValueError("One diffusion timestep is required per batch element")
 
         embedding = self.time_embedding(timestep)
+        if self.metadata_conditioner is not None:
+            embedding = embedding + self.metadata_conditioner(
+                section_id,
+                domain_id,
+                batch_size=noisy_patch.shape[0],
+                device=noisy_patch.device,
+            )
         hidden = self.input_projection(noisy_patch)
         skips: list[torch.Tensor] = []
         for index, stage in enumerate(self.down_stages):
@@ -274,5 +285,4 @@ class UNetDenoiser(nn.Module):
         return self.output_projection(F.silu(self.output_norm(hidden)))
 
 
-# Keep the stage-1 public name valid while stage 5 adds metadata conditioning.
 ConditionalUNet = UNetDenoiser

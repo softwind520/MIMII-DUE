@@ -92,12 +92,19 @@ class GaussianDiffusion(nn.Module):
         clean: torch.Tensor,
         timesteps: torch.Tensor | None = None,
         noise: torch.Tensor | None = None,
+        section_id: torch.Tensor | None = None,
+        domain_id: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return the standard simplified DDPM epsilon-prediction loss."""
         if timesteps is None:
             timesteps = self.sample_timesteps(clean.shape[0], clean.device)
         noisy, target_noise = self.q_sample(clean, timesteps, noise)
-        predicted_noise = model(noisy, timesteps)
+        predicted_noise = model(
+            noisy,
+            timesteps,
+            section_id=section_id,
+            domain_id=domain_id,
+        )
         return F.mse_loss(predicted_noise, target_noise)
 
     @torch.no_grad()
@@ -108,6 +115,8 @@ class GaussianDiffusion(nn.Module):
         start_step: int | None = None,
         stride: int | None = None,
         noise: torch.Tensor | None = None,
+        section_id: torch.Tensor | None = None,
+        domain_id: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Partially noise ``clean`` and reconstruct it with deterministic DDIM."""
         diffusion_config = self.config["diffusion"]
@@ -141,7 +150,12 @@ class GaussianDiffusion(nn.Module):
             current = torch.full(
                 (clean.shape[0],), current_step, device=clean.device, dtype=torch.long
             )
-            predicted_noise = model(sample, current)
+            predicted_noise = model(
+                sample,
+                current,
+                section_id=section_id,
+                domain_id=domain_id,
+            )
             alpha = self.cumulative_alphas[current_step].to(dtype=sample.dtype)
             predicted_clean = (
                 sample - (1.0 - alpha).sqrt() * predicted_noise

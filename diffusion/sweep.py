@@ -198,6 +198,8 @@ def evaluate_fan_sweep(
         with torch.inference_mode():
             for batch_index, batch in enumerate(loader, start=1):
                 clean = batch["patch"].to(device, non_blocking=True).mul(2.0).sub(1.0)
+                section_id = batch["section_id"].to(device, non_blocking=True)
+                domain_id = batch["domain_id"].to(device, non_blocking=True)
                 reconstructed = torch.zeros_like(clean)
                 with torch.autocast(
                     device_type=device.type,
@@ -207,7 +209,11 @@ def evaluate_fan_sweep(
                     for _ in range(reconstruction_samples):
                         reconstructed.add_(
                             diffusion.ddim_reconstruct(
-                                model, clean, start_step=start_step
+                                model,
+                                clean,
+                                start_step=start_step,
+                                section_id=section_id,
+                                domain_id=domain_id,
                             )
                         )
                 reconstructed.div_(reconstruction_samples)

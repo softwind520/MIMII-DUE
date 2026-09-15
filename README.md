@@ -222,3 +222,92 @@ of redundant computation caused by a five-frame hop. It can be overridden with
   statistical scorers can be tested without repeating DDIM reconstruction;
 - ``fan_gmm_best.json`` and ``fan_gmm_run.json`` record the best result and the
   full run configuration.
+
+## Train the section/domain-conditional diffusion model
+
+``diffusion.yaml`` remains the reproducible unconditional experiment used by
+the existing fan checkpoint. The new ``conditional.yaml`` enables real section
+and domain conditioning and writes to separate ``checkpoints_conditional/`` and
+``outputs_conditional/`` directories, so it cannot overwrite the unconditional
+baseline.
+
+The condition projector concatenates learned section and domain embeddings,
+projects them to the timestep-embedding dimension, and adds the result to the
+timestep embedding used for scale-shift modulation in every U-Net residual
+block. During training, both labels are jointly replaced by learned unknown
+labels with probability 0.1. This classifier-free condition dropout prevents
+the denoiser from depending completely on metadata and provides a defined
+fallback for unavailable labels.
+
+Validate the conditional data contract and run one real optimization step:
+
+```bash
+python 00_train.py --config conditional.yaml --check-data --machine-type fan --max-files 12
+CUDA_VISIBLE_DEVICES=1 python 00_train.py --config conditional.yaml --smoke-test --machine-type fan
+```
+
+The smoke checkpoint is isolated under
+``checkpoints_conditional/smoke/fan/``. Start the full fan training with:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 00_train.py --config conditional.yaml --machine-type fan
+```
+
+Use ``--resume`` only to continue an interrupted full conditional run. Once the
+100 epochs finish, evaluate it with the same frozen two-component GMM protocol
+used by the unconditional model:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --config conditional.yaml --fan-gmm --machine-type fan
+```
+
+This produces the controlled comparison:
+
+```text
+checkpoints/fan/ema.pt              unconditional model
+checkpoints_conditional/fan/ema.pt  section/domain-conditional model
+outputs/fan_gmm/                    unconditional GMM result
+outputs_conditional/fan_gmm/        conditional GMM result
+```
+
+The Log-Mel extraction settings are unchanged, so both experiments safely share
+the existing ``feature_cache/``.
+
+## Train the section-only conditional diffusion model
+
+``section_only.yaml`` is the controlled ablation prompted by the weak target-domain
+result of explicit domain conditioning. It keeps learned section conditioning and
+domain-balanced source/target sampling, but the domain label is not passed to the
+U-Net. Its checkpoints and results are isolated under
+``checkpoints_section_only/`` and ``outputs_section_only/``.
+
+Validate the data pipeline and perform the disposable one-step training check:
+
+```bash
+python 00_train.py --config section_only.yaml --check-data --machine-type fan --max-files 12
+CUDA_VISIBLE_DEVICES=1 python 00_train.py --config section_only.yaml --smoke-test --machine-type fan
+```
+
+After the smoke checkpoint succeeds, it may be deleted because it is not a
+scientific result. Keep the automated tests and the ``--smoke-test`` option for
+future model changes. Start the full training from a clean section-only directory:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 00_train.py --config section_only.yaml --machine-type fan
+```
+
+Evaluate the trained model with exactly the same frozen GMM protocol:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --config section_only.yaml --fan-gmm --machine-type fan \
+  --gmm-start-step 400 --gmm-patch-hop 32 --gmm-residual-modes signed \
+  --gmm-scopes section --gmm-covariances diag --gmm-components 2
+```
+
+The three controlled experiments are therefore:
+
+```text
+diffusion.yaml      no metadata condition
+conditional.yaml    section + domain conditions
+section_only.yaml   section condition only; domain-balanced sampling retained
+```

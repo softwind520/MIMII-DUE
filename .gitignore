@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 checkpoints/
 outputs/
+checkpoints_conditional/
+outputs_conditional/
+checkpoints_section_only/
+outputs_section_only/
 feature_cache/
 *.pt
 *.pth

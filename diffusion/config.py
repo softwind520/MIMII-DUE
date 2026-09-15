@@ -34,6 +34,19 @@ def load_config(path: str | Path) -> dict[str, Any]:
         missing_text = ", ".join(sorted(missing))
         raise ValueError(f"Missing configuration sections: {missing_text}")
 
+    conditioning = config["conditioning"]
+    if not isinstance(conditioning, dict):
+        raise ValueError("conditioning must be a mapping")
+    uses_section = bool(conditioning.get("use_section", False))
+    uses_domain = bool(conditioning.get("use_domain", False))
+    if uses_section and int(conditioning.get("num_sections", 0)) < 1:
+        raise ValueError("conditioning.num_sections must be positive")
+    dropout = float(conditioning.get("condition_dropout", 0.0))
+    if not 0.0 <= dropout < 1.0:
+        raise ValueError("conditioning.condition_dropout must satisfy 0 <= p < 1")
+    if (uses_section or uses_domain) and "condition_dimension" not in config["model"]:
+        raise ValueError("model.condition_dimension is required for metadata conditioning")
+
     config["_config_path"] = str(config_path)
     config["_project_root"] = str(config_path.parent)
     return config

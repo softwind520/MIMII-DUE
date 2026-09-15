@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from pathlib import Path
 
 from diffusion.config import load_config
 from diffusion.engine import evaluate
@@ -99,7 +100,8 @@ def main() -> None:
         config["diffusion"]["ddim_stride"] = 70
         config["evaluation"]["batch_size"] = 8
         config["evaluation"]["num_workers"] = 0
-        config["project"]["output_directory"] = "./outputs/smoke"
+        output_directory = Path(config["project"]["output_directory"])
+        config["project"]["output_directory"] = str(output_directory / "smoke")
         max_files_per_group = max_files_per_group or 1
     if args.fan_sweep and args.fan_gmm:
         raise ValueError("--fan-sweep and --fan-gmm cannot be used together")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from pathlib import Path
 
 from diffusion.config import load_config
 from diffusion.data_check import check_data_pipeline
@@ -22,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--smoke-test",
         action="store_true",
-        help="Run one real training step with batch size 1 and save under checkpoints/smoke",
+        help="Run one real training step with batch size 1 under the configured checkpoint directory",
     )
     return parser.parse_args()
 
@@ -44,7 +45,10 @@ def main() -> None:
         config["training"]["gradient_accumulation_steps"] = 1
         config["training"]["num_workers"] = 0
         config["training"]["epochs"] = 1
-        config["project"]["checkpoint_directory"] = "./checkpoints/smoke"
+        checkpoint_directory = Path(config["project"]["checkpoint_directory"])
+        config["project"]["checkpoint_directory"] = str(
+            checkpoint_directory / "smoke"
+        )
         machine_types = args.machine_types or [config["data"]["machine_types"][0]]
         max_steps = args.max_steps or 1
     else:

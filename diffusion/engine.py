@@ -203,11 +203,23 @@ def _train_machine(
 
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     accumulation_steps = int(training_config.get("gradient_accumulation_steps", 1))
+    conditioning_config = config["conditioning"]
+    active_conditions = [
+        name
+        for name, enabled in (
+            ("section", conditioning_config.get("use_section", False)),
+            ("domain", conditioning_config.get("use_domain", False)),
+        )
+        if enabled
+    ]
+    condition_name = "+".join(active_conditions) if active_conditions else "none"
     print(
         f"train_start: machine={machine_type} device={device} "
         f"patches={len(loader.dataset)} batches={len(loader)} parameters={parameter_count:,} "
         f"batch={loader.batch_size} accumulation={accumulation_steps} "
-        f"effective_batch={loader.batch_size * accumulation_steps} amp={use_amp}"
+        f"effective_batch={loader.batch_size * accumulation_steps} amp={use_amp} "
+        f"conditioning={condition_name} "
+        f"condition_dropout={float(conditioning_config.get('condition_dropout', 0.0))}"
     )
 
     epochs = int(training_config["epochs"])
@@ -226,11 +238,18 @@ def _train_machine(
         for batch_index, batch in enumerate(loader):
             clean = batch["patch"].to(device, non_blocking=True)
             clean = clean.mul(2.0).sub(1.0)
+            section_id = batch["section_id"].to(device, non_blocking=True)
+            domain_id = batch["domain_id"].to(device, non_blocking=True)
             group_start = (batch_index // accumulation_steps) * accumulation_steps
             group_size = min(accumulation_steps, len(loader) - group_start)
 
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
-                loss = diffusion.training_loss(model, clean)
+                loss = diffusion.training_loss(
+                    model,
+                    clean,
+                    section_id=section_id,
+                    domain_id=domain_id,
+                )
             if not torch.isfinite(loss):
                 raise FloatingPointError(
                     f"Non-finite loss for {machine_type} at epoch={epoch + 1}, step={global_step + 1}"
@@ -288,7 +307,7 @@ def train(
     max_steps: int | None = None,
     resume: bool = False,
 ) -> None:
-    """Train one unconditional DDPM per configured machine type."""
+    """Train one metadata-conditional or unconditional DDPM per machine type."""
     if max_steps is not None and max_steps < 1:
         raise ValueError("max_steps must be positive")
     configured_machines = list(config["data"]["machine_types"])
@@ -529,6 +548,8 @@ def evaluate(
         with torch.inference_mode():
             for batch_index, batch in enumerate(loader, start=1):
                 clean = batch["patch"].to(device, non_blocking=True).mul(2.0).sub(1.0)
+                section_id = batch["section_id"].to(device, non_blocking=True)
+                domain_id = batch["domain_id"].to(device, non_blocking=True)
                 reconstructed = torch.zeros_like(clean)
                 with torch.autocast(
                     device_type=device.type,
@@ -536,7 +557,14 @@ def evaluate(
                     enabled=use_amp,
                 ):
                     for _ in range(reconstruction_samples):
-                        reconstructed.add_(diffusion.ddim_reconstruct(model, clean))
+                        reconstructed.add_(
+                            diffusion.ddim_reconstruct(
+                                model,
+                                clean,
+                                section_id=section_id,
+                                domain_id=domain_id,
+                            )
+                        )
                 reconstructed.div_(reconstruction_samples)
                 scores = score_reconstruction(clean, reconstructed, config)
                 if not torch.isfinite(scores).all():

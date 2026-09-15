@@ -104,6 +104,14 @@ def check_data_pipeline(
         raise ValueError(
             f"Unexpected batch shape {tuple(batch['patch'].shape)}; expected {expected_batch_shape}"
         )
+    conditioning_config = config["conditioning"]
+    if bool(conditioning_config.get("use_section", False)):
+        num_sections = int(conditioning_config["num_sections"])
+        if bool(((batch["section_id"] < 0) | (batch["section_id"] >= num_sections)).any()):
+            raise ValueError(f"Section ids fall outside [0, {num_sections - 1}]")
+    if bool(conditioning_config.get("use_domain", False)):
+        if bool(((batch["domain_id"] < 0) | (batch["domain_id"] > 1)).any()):
+            raise ValueError("Known domain ids must be source=0 or target=1")
 
     print(f"checked_audio_files: {len(first_item_for_record)}")
     print(f"indexed_training_patches: {len(dataset)}")
@@ -112,4 +120,10 @@ def check_data_pipeline(
     print(f"balanced_domain_mass: {dict(sorted(domain_mass.items()))}")
     print(f"feature_range: [{minimum:.6f}, {maximum:.6f}]")
     print(f"feature_cache: {cache_root if cache_root else 'disabled for this check'}")
+    print(
+        "conditioning: "
+        f"section={bool(conditioning_config.get('use_section', False))} "
+        f"domain={bool(conditioning_config.get('use_domain', False))} "
+        f"dropout={float(conditioning_config.get('condition_dropout', 0.0))}"
+    )
     print("data_pipeline_check: PASS")

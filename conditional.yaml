@@ -1,9 +1,9 @@
 project:
-  name: dbcd_diffusion
+  name: dbcd_conditional_diffusion
   seed: 42
   device: auto
-  checkpoint_directory: ./checkpoints
-  output_directory: ./outputs
+  checkpoint_directory: ./checkpoints_conditional
+  output_directory: ./outputs_conditional
 
 data:
   root: ../dev_data
@@ -36,11 +36,11 @@ model:
   condition_dimension: 128
 
 conditioning:
-  use_section: false
-  use_domain: false
+  use_section: true
+  use_domain: true
   num_sections: 3
   domain_balance: true
-  condition_dropout: 0.0
+  condition_dropout: 0.1
 
 diffusion:
   training_steps: 1000
@@ -48,7 +48,7 @@ diffusion:
   beta_start: 0.0001
   beta_end: 0.02
   prediction_type: epsilon
-  inference_start_step: 280
+  inference_start_step: 400
   ddim_stride: 20
   clip_denoised: true
 
