@@ -311,3 +311,40 @@ diffusion.yaml      no metadata condition
 conditional.yaml    section + domain conditions
 section_only.yaml   section condition only; domain-balanced sampling retained
 ```
+
+## Expand the section-only model to all machines
+
+The training engine already creates one independent denoiser per machine. Keep
+the completed fan checkpoint and train the remaining four machines sequentially:
+
+```bash
+python 00_train.py --config section_only.yaml --check-data --max-files 12
+CUDA_VISIBLE_DEVICES=1 python 00_train.py --config section_only.yaml \
+  --machine-type gearbox --machine-type pump --machine-type slider \
+  --machine-type valve
+```
+
+Each machine writes to its own directory under ``checkpoints_section_only/``.
+The command does not touch ``checkpoints_section_only/fan/`` because fan is not
+included in the machine list. If a run is interrupted, resume only that machine
+with ``--machine-type MACHINE --resume`` before starting the remaining machines.
+
+After all five ``ema.pt`` files exist, run the frozen GMM protocol on every
+machine. The new ``--gmm`` mode defaults to the fan-selected signed residual,
+section-specific, diagonal two-component GMM, so it does not perform a new
+hyperparameter search:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python 01_test.py --config section_only.yaml --gmm
+```
+
+Individual outputs are written to ``outputs_section_only/MACHINE_gmm/``. The
+cross-machine report is written directly under ``outputs_section_only/``:
+
+- ``gmm_all_summary.csv`` and ``gmm_all_best.json`` contain the harmonic means
+  over every machine/section/domain AUC and pAUC;
+- ``gmm_all_groups.csv`` contains all per-group metrics with the machine name;
+- ``gmm_all_run.json`` records all checkpoints and evaluation settings.
+
+``--fan-gmm`` remains available for reproducing the original fan-only sweep,
+while ``--gmm --machine-type MACHINE`` can evaluate a selected machine.

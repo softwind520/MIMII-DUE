@@ -1,4 +1,4 @@
-"""Residual-distribution GMM scoring for a trained fan diffusion model."""
+"""Residual-distribution GMM scoring for trained diffusion models."""
 
 from __future__ import annotations
 
@@ -265,8 +265,9 @@ def _write_rows(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def evaluate_fan_gmm(
+def _evaluate_machine_gmm(
     config: dict,
+    machine_type: str,
     start_step: int = 400,
     patch_hop: int = 32,
     residual_modes: list[str] | None = None,
@@ -276,8 +277,8 @@ def evaluate_fan_gmm(
     reg_covar: float = 1e-5,
     max_test_files_per_group: int | None = None,
     max_train_files_per_section_domain: int | None = None,
-) -> None:
-    """Fit GMMs on normal fan residuals and evaluate their likelihood scores."""
+) -> dict:
+    """Fit GMMs on one machine's normal residuals and write its scores."""
     residual_modes = list(dict.fromkeys(residual_modes or RESIDUAL_MODES))
     scopes = list(dict.fromkeys(scopes or GMM_SCOPES))
     covariance_types = list(
@@ -303,7 +304,6 @@ def evaluate_fan_gmm(
     gmm_config = deepcopy(config)
     gmm_config["data"]["test_patch_hop"] = patch_hop
     gmm_config["data"]["cover_tail"] = True
-    machine_type = "fan"
     seed = int(gmm_config["project"]["seed"])
     _set_seed(seed)
     device = _resolve_device(gmm_config)
@@ -338,7 +338,7 @@ def evaluate_fan_gmm(
 
     output_root = (
         resolve_config_path(gmm_config, gmm_config["project"]["output_directory"])
-        / "fan_gmm"
+        / f"{machine_type}_gmm"
     )
     output_root.mkdir(parents=True, exist_ok=True)
     run_metadata = {
@@ -361,11 +361,13 @@ def evaluate_fan_gmm(
         "components": components,
         "reg_covar": reg_covar,
     }
-    with (output_root / "fan_gmm_run.json").open("w", encoding="utf-8") as stream:
+    with (output_root / f"{machine_type}_gmm_run.json").open(
+        "w", encoding="utf-8"
+    ) as stream:
         json.dump(run_metadata, stream, indent=2)
 
     print(
-        f"fan_gmm_start: checkpoint={checkpoint_path} "
+        f"gmm_start: machine={machine_type} checkpoint={checkpoint_path} "
         f"epoch={int(checkpoint['epoch']) + 1} start={start_step} "
         f"patch_hop={patch_hop} train_files={len(train_records)} "
         f"train_patches={len(train_loader.dataset)} test_files={len(test_records)} "
@@ -407,7 +409,7 @@ def evaluate_fan_gmm(
     test_domains = np.asarray([record.domain for record in test_records])
     test_labels = np.asarray([int(record.label) for record in test_records])
     np.savez_compressed(
-        output_root / "fan_residual_features.npz",
+        output_root / f"{machine_type}_residual_features.npz",
         train_paths=train_paths,
         test_paths=test_paths,
         train_sections=train_sections,
@@ -467,22 +469,199 @@ def evaluate_fan_gmm(
                 )
 
     summary_rows.sort(key=lambda row: float(row["overall_hmean"]), reverse=True)
-    _write_rows(output_root / "fan_gmm_summary.csv", summary_rows)
-    _write_rows(output_root / "fan_gmm_groups.csv", group_rows)
-    _write_rows(output_root / "fan_gmm_audio_scores.csv", score_rows)
+    _write_rows(output_root / f"{machine_type}_gmm_summary.csv", summary_rows)
+    _write_rows(output_root / f"{machine_type}_gmm_groups.csv", group_rows)
+    _write_rows(output_root / f"{machine_type}_gmm_audio_scores.csv", score_rows)
     best = summary_rows[0]
-    with (output_root / "fan_gmm_best.json").open("w", encoding="utf-8") as stream:
+    with (output_root / f"{machine_type}_gmm_best.json").open(
+        "w", encoding="utf-8"
+    ) as stream:
         json.dump(best, stream, indent=2)
     elapsed = time.perf_counter() - start_time
     print(
-        "fan_gmm_best: "
+        f"gmm_best: machine={machine_type} "
         f"residual={best['residual_mode']} scope={best['scope']} "
         f"covariance={best['covariance_type']} "
         f"auc_mean={best['auc_mean']:.6f} pauc_mean={best['pauc_mean']:.6f} "
         f"overall_hmean={best['overall_hmean']:.6f}"
     )
-    print(f"fan_gmm_complete: seconds={elapsed:.1f} results={output_root}")
     print(
-        "warning: the best GMM is selected on labelled development-test data; "
-        "freeze it before evaluating other machines or final evaluation data"
+        f"gmm_complete: machine={machine_type} seconds={elapsed:.1f} "
+        f"results={output_root}"
+    )
+    return {
+        "machine_type": machine_type,
+        "run_metadata": run_metadata,
+        "summary_rows": summary_rows,
+        "group_rows": group_rows,
+        "best": best,
+    }
+
+
+_GMM_OPTION_FIELDS = (
+    "residual_mode",
+    "scope",
+    "covariance_type",
+    "components",
+    "reg_covar",
+)
+
+
+def _gmm_option_key(row: dict) -> tuple:
+    return tuple(row[field] for field in _GMM_OPTION_FIELDS)
+
+
+def _aggregate_machine_results(machine_results: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Combine identical GMM protocols across machines without per-machine tuning."""
+    if not machine_results:
+        raise ValueError("At least one machine result is required")
+
+    all_group_rows: list[dict] = []
+    diagnostics: dict[tuple, list[dict]] = defaultdict(list)
+    for result in machine_results:
+        machine_type = result["machine_type"]
+        for row in result["group_rows"]:
+            all_group_rows.append({"machine_type": machine_type, **row})
+        for row in result["summary_rows"]:
+            diagnostics[_gmm_option_key(row)].append(row)
+
+    aggregate_rows: list[dict] = []
+    for option_key, diagnostic_rows in diagnostics.items():
+        matching_metrics = [
+            row for row in all_group_rows if _gmm_option_key(row) == option_key
+        ]
+        common = dict(zip(_GMM_OPTION_FIELDS, option_key))
+        aggregate_rows.append(
+            {
+                **common,
+                "machine_count": len(machine_results),
+                "metric_groups": len(matching_metrics),
+                "gmm_groups": sum(int(row["gmm_groups"]) for row in diagnostic_rows),
+                "all_converged": all(
+                    bool(row["all_converged"]) for row in diagnostic_rows
+                ),
+                "max_iterations": max(
+                    int(row["max_iterations"]) for row in diagnostic_rows
+                ),
+                **_summarize(matching_metrics),
+            }
+        )
+    aggregate_rows.sort(
+        key=lambda row: float(row["overall_hmean"]), reverse=True
+    )
+    return aggregate_rows, all_group_rows
+
+
+def evaluate_gmm(
+    config: dict,
+    machine_types: list[str] | None = None,
+    start_step: int = 400,
+    patch_hop: int = 32,
+    residual_modes: list[str] | None = None,
+    scopes: list[str] | None = None,
+    covariance_types: list[str] | None = None,
+    components: int = 2,
+    reg_covar: float = 1e-5,
+    max_test_files_per_group: int | None = None,
+    max_train_files_per_section_domain: int | None = None,
+) -> None:
+    """Evaluate one frozen GMM protocol on one or more machine types."""
+    configured_machines = list(config["data"]["machine_types"])
+    selected_machines = list(
+        dict.fromkeys(machine_types if machine_types is not None else configured_machines)
+    )
+    if not selected_machines:
+        raise ValueError("At least one machine type is required for GMM evaluation")
+    unknown = sorted(set(selected_machines).difference(configured_machines))
+    if unknown:
+        raise ValueError(f"Unknown machine types: {', '.join(unknown)}")
+    checkpoint_root = resolve_config_path(
+        config, config["project"]["checkpoint_directory"]
+    )
+    missing_checkpoints = [
+        machine_type
+        for machine_type in selected_machines
+        if not (checkpoint_root / machine_type / "ema.pt").is_file()
+        and not (checkpoint_root / machine_type / "last.pt").is_file()
+    ]
+    if missing_checkpoints:
+        raise FileNotFoundError(
+            "Missing GMM evaluation checkpoints for: "
+            + ", ".join(missing_checkpoints)
+        )
+
+    machine_results = [
+        _evaluate_machine_gmm(
+            config,
+            machine_type=machine_type,
+            start_step=start_step,
+            patch_hop=patch_hop,
+            residual_modes=residual_modes,
+            scopes=scopes,
+            covariance_types=covariance_types,
+            components=components,
+            reg_covar=reg_covar,
+            max_test_files_per_group=max_test_files_per_group,
+            max_train_files_per_section_domain=max_train_files_per_section_domain,
+        )
+        for machine_type in selected_machines
+    ]
+    aggregate_rows, aggregate_group_rows = _aggregate_machine_results(
+        machine_results
+    )
+    output_root = resolve_config_path(
+        config, config["project"]["output_directory"]
+    )
+    output_root.mkdir(parents=True, exist_ok=True)
+    _write_rows(output_root / "gmm_all_summary.csv", aggregate_rows)
+    _write_rows(output_root / "gmm_all_groups.csv", aggregate_group_rows)
+    best = aggregate_rows[0]
+    with (output_root / "gmm_all_best.json").open("w", encoding="utf-8") as stream:
+        json.dump(best, stream, indent=2)
+    run_metadata = {
+        "machine_types": selected_machines,
+        "machine_runs": [result["run_metadata"] for result in machine_results],
+    }
+    with (output_root / "gmm_all_run.json").open("w", encoding="utf-8") as stream:
+        json.dump(run_metadata, stream, indent=2)
+    print(
+        f"gmm_all_best: machines={len(selected_machines)} "
+        f"groups={best['metric_groups']} residual={best['residual_mode']} "
+        f"scope={best['scope']} covariance={best['covariance_type']} "
+        f"auc_mean={best['auc_mean']:.6f} pauc_mean={best['pauc_mean']:.6f} "
+        f"overall_hmean={best['overall_hmean']:.6f}"
+    )
+    print(f"gmm_all_complete: results={output_root}")
+    if len(aggregate_rows) > 1:
+        print(
+            "warning: multiple GMM protocols were compared on labelled "
+            "development-test data; use a single frozen protocol for final reporting"
+        )
+
+
+def evaluate_fan_gmm(
+    config: dict,
+    start_step: int = 400,
+    patch_hop: int = 32,
+    residual_modes: list[str] | None = None,
+    scopes: list[str] | None = None,
+    covariance_types: list[str] | None = None,
+    components: int = 2,
+    reg_covar: float = 1e-5,
+    max_test_files_per_group: int | None = None,
+    max_train_files_per_section_domain: int | None = None,
+) -> None:
+    """Backward-compatible fan-only GMM entry point."""
+    evaluate_gmm(
+        config,
+        machine_types=["fan"],
+        start_step=start_step,
+        patch_hop=patch_hop,
+        residual_modes=residual_modes,
+        scopes=scopes,
+        covariance_types=covariance_types,
+        components=components,
+        reg_covar=reg_covar,
+        max_test_files_per_group=max_test_files_per_group,
+        max_train_files_per_section_domain=max_train_files_per_section_domain,
     )

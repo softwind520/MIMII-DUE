@@ -5,7 +5,11 @@ import unittest
 import numpy as np
 import torch
 
-from diffusion.gmm_scoring import fit_gmm_anomaly_scores, pool_residual_features
+from diffusion.gmm_scoring import (
+    _aggregate_machine_results,
+    fit_gmm_anomaly_scores,
+    pool_residual_features,
+)
 
 
 class GMMScoringTest(unittest.TestCase):
@@ -42,7 +46,56 @@ class GMMScoringTest(unittest.TestCase):
         self.assertGreater(scores[1], scores[0])
         self.assertTrue(diagnostics["all_converged"])
 
+    def test_machine_results_are_aggregated_under_one_protocol(self) -> None:
+        common = {
+            "residual_mode": "signed",
+            "scope": "section",
+            "covariance_type": "diag",
+            "components": 2,
+            "reg_covar": 1e-5,
+        }
+
+        def result(machine_type, aucs, paucs, iterations):
+            groups = [
+                {
+                    **common,
+                    "section": f"section_{index:02d}",
+                    "domain": "source",
+                    "auc": auc,
+                    "pauc": pauc,
+                    "normal_files": 100,
+                    "anomaly_files": 100,
+                }
+                for index, (auc, pauc) in enumerate(zip(aucs, paucs))
+            ]
+            return {
+                "machine_type": machine_type,
+                "group_rows": groups,
+                "summary_rows": [
+                    {
+                        **common,
+                        "gmm_groups": 2,
+                        "all_converged": True,
+                        "max_iterations": iterations,
+                    }
+                ],
+            }
+
+        summary, groups = _aggregate_machine_results(
+            [
+                result("fan", [0.8, 0.6], [0.6, 0.5], 10),
+                result("pump", [0.9, 0.7], [0.7, 0.6], 14),
+            ]
+        )
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(summary[0]["machine_count"], 2)
+        self.assertEqual(summary[0]["metric_groups"], 4)
+        self.assertEqual(summary[0]["gmm_groups"], 4)
+        self.assertEqual(summary[0]["max_iterations"], 14)
+        self.assertAlmostEqual(summary[0]["auc_mean"], 0.75)
+        self.assertAlmostEqual(summary[0]["pauc_mean"], 0.6)
+        self.assertEqual({row["machine_type"] for row in groups}, {"fan", "pump"})
+
 
 if __name__ == "__main__":
     unittest.main()
-
